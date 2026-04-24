@@ -69,6 +69,13 @@ class QueryCacheletBuilder implements CacheletBuilderInterface
         return $this;
     }
 
+    public function onStore(?string $store): static
+    {
+        $this->builder->onStore($store);
+
+        return $this;
+    }
+
     public function scope(CacheScope $scope): static
     {
         $this->hasExplicitScope = true;
