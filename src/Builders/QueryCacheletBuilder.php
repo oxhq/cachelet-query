@@ -9,24 +9,36 @@ use Oxhq\Cachelet\Contracts\CacheletBuilderInterface;
 use Oxhq\Cachelet\Facades\Cachelet;
 use Oxhq\Cachelet\Query\Support\QueryPayloadFactory;
 use Oxhq\Cachelet\ValueObjects\CacheCoordinate;
+use Oxhq\Cachelet\ValueObjects\CacheScope;
 
 class QueryCacheletBuilder implements CacheletBuilderInterface
 {
     protected CacheletBuilderInterface $builder;
+
+    protected string $inferredScopeIdentifier;
+
+    protected bool $hasExplicitScope = false;
 
     public function __construct(
         protected EloquentBuilder|BaseBuilder $query,
         protected QueryPayloadFactory $payloadFactory,
         ?string $prefix = null,
     ) {
-        $this->builder = Cachelet::for($prefix ?? $this->payloadFactory->prefixFor($query))
+        $resolvedPrefix = $prefix ?? $this->payloadFactory->prefixFor($query);
+
+        $builder = Cachelet::for($resolvedPrefix)
             ->from($this->payloadFactory->make($query))
             ->withTags($this->payloadFactory->tagsFor($query))
             ->withMetadata([
                 'connection' => $this->connectionName(),
                 'table' => $this->payloadFactory->tableFor($query),
-                'type' => 'query',
             ]);
+
+        $builder->asModule('query');
+
+        $this->builder = $builder;
+        $this->inferredScopeIdentifier = $resolvedPrefix;
+        $this->applyInferredScope();
     }
 
     public function from(mixed $payload): static
@@ -53,6 +65,23 @@ class QueryCacheletBuilder implements CacheletBuilderInterface
     public function withMetadata(array $metadata): static
     {
         $this->builder->withMetadata($metadata);
+
+        return $this;
+    }
+
+    public function scope(CacheScope $scope): static
+    {
+        $this->hasExplicitScope = true;
+        $this->builder->scope($scope);
+
+        return $this;
+    }
+
+    public function withInferredScope(CacheScope $scope): static
+    {
+        if (! $this->hasExplicitScope) {
+            $this->builder->withInferredScope($scope);
+        }
 
         return $this;
     }
@@ -165,5 +194,21 @@ class QueryCacheletBuilder implements CacheletBuilderInterface
         }
 
         return (string) $connection->getDatabaseName();
+    }
+
+    protected function applyInferredScope(): void
+    {
+        if ($this->hasExplicitScope) {
+            return;
+        }
+
+        $scope = $this->makeInferredScope($this->inferredScopeIdentifier);
+
+        $this->builder->withInferredScope($scope);
+    }
+
+    protected function makeInferredScope(string $identifier): ?CacheScope
+    {
+        return CacheScope::inferred($identifier);
     }
 }
